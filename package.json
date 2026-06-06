@@ -1,0 +1,36 @@
+{
+  "name": "bar-card-modernized",
+  "version": "4.0.0-fork.0",
+  "description": "Modernized maintained community fork of custom-cards/bar-card for Home Assistant dashboards.",
+  "type": "module",
+  "main": "dist/bar-card.js",
+  "module": "dist/bar-card.js",
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE",
+    "hacs.json"
+  ],
+  "keywords": [
+    "home-assistant",
+    "homeassistant",
+    "lovelace",
+    "custom-card",
+    "hacs",
+    "bar-card"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ichwars/bar-card-modernized.git"
+  },
+  "author": "Bar Card Modernized contributors",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "check": "node --check dist/bar-card.js",
+    "harness": "node scripts/serve-harness.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

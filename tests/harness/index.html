@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bar Card Modernized Harness</title>
+    <style>
+      :root {
+        --primary-color: #007a78;
+        --primary-text-color: #172026;
+        --secondary-text-color: #52616b;
+        --warning-color: #ffd166;
+        --error-color: #d94841;
+        --success-color: #238636;
+        --ha-card-border-radius: 8px;
+        --card-background-color: #ffffff;
+        color: var(--primary-text-color);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body {
+        background: #f4f6f8;
+        margin: 0;
+      }
+
+      body.dark {
+        --primary-color: #4cc9c1;
+        --primary-text-color: #edf2f4;
+        --secondary-text-color: #b9c2ca;
+        --card-background-color: #1f2933;
+        background: #101820;
+      }
+
+      header {
+        align-items: center;
+        border-bottom: 1px solid rgba(82, 97, 107, .18);
+        display: flex;
+        gap: 16px;
+        justify-content: space-between;
+        padding: 16px 20px;
+      }
+
+      h1 {
+        font-size: 20px;
+        font-weight: 650;
+        margin: 0;
+      }
+
+      main {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: 280px minmax(0, 1fr);
+        padding: 16px;
+      }
+
+      aside,
+      section {
+        min-width: 0;
+      }
+
+      .panel {
+        background: var(--card-background-color);
+        border: 1px solid rgba(82, 97, 107, .18);
+        border-radius: 8px;
+        box-shadow: 0 1px 2px rgba(16, 24, 32, .06);
+        padding: 12px;
+      }
+
+      .controls {
+        display: grid;
+        gap: 8px;
+      }
+
+      button,
+      select {
+        background: var(--card-background-color);
+        border: 1px solid rgba(82, 97, 107, .35);
+        border-radius: 6px;
+        color: var(--primary-text-color);
+        font: inherit;
+        min-height: 36px;
+        padding: 6px 10px;
+      }
+
+      button {
+        cursor: pointer;
+        text-align: left;
+      }
+
+      button:hover {
+        border-color: var(--primary-color);
+      }
+
+      label {
+        color: var(--secondary-text-color);
+        display: grid;
+        font-size: 13px;
+        gap: 4px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      }
+
+      .scenario-title {
+        color: var(--secondary-text-color);
+        font-size: 13px;
+        font-weight: 650;
+        margin: 0 0 8px;
+      }
+
+      ha-card {
+        background: var(--card-background-color);
+        border: 1px solid rgba(82, 97, 107, .18);
+        border-radius: var(--ha-card-border-radius);
+        box-shadow: 0 1px 2px rgba(16, 24, 32, .08);
+        box-sizing: border-box;
+        display: block;
+        overflow: hidden;
+      }
+
+      .log,
+      .checks {
+        color: var(--secondary-text-color);
+        font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        margin: 8px 0 0;
+        max-height: 240px;
+        overflow: auto;
+        white-space: pre-wrap;
+      }
+
+      .pass {
+        color: var(--success-color);
+      }
+
+      .fail {
+        color: var(--error-color);
+      }
+
+      @media (max-width: 780px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Bar Card Modernized Harness</h1>
+      <button id="theme-toggle" type="button">Toggle theme</button>
+    </header>
+
+    <main>
+      <aside class="panel">
+        <div class="controls">
+          <button id="randomize" type="button">Randomize sensor states</button>
+          <button id="toggle-availability" type="button">Toggle unavailable entity</button>
+          <button id="run-checks" type="button">Run smoke checks</button>
+          <label>
+            Sort demo
+            <select id="sort-mode">
+              <option value="none">none</option>
+              <option value="asc">asc</option>
+              <option value="desc">desc</option>
+            </select>
+          </label>
+        </div>
+        <div id="checks" class="checks"></div>
+        <div id="log" class="log"></div>
+      </aside>
+
+      <section>
+        <div id="cards" class="grid"></div>
+      </section>
+    </main>
+
+    <script type="module">
+      localStorage.setItem("selectedLanguage", "de");
+
+      class HaIcon extends HTMLElement {
+        connectedCallback() {
+          const icon = this.getAttribute("icon") || "mdi:checkbox-blank-circle-outline";
+          this.textContent = icon.replace("mdi:", "");
+          this.style.fontSize = "11px";
+          this.style.textAlign = "center";
+        }
+      }
+
+      if (!customElements.get("ha-icon")) customElements.define("ha-icon", HaIcon);
+
+      await import("../../src/bar-card.js");
+
+      const log = document.querySelector("#log");
+      const checks = document.querySelector("#checks");
+      const cards = document.querySelector("#cards");
+      const sortMode = document.querySelector("#sort-mode");
+
+      const state = {
+        unavailableHidden: true,
+        states: makeStates(),
+      };
+
+      function makeState(entityId, value, attributes = {}) {
+        return {
+          entity_id: entityId,
+          state: String(value),
+          attributes,
+        };
+      }
+
+      function makeStates() {
+        return {
+          "sensor.battery": makeState("sensor.battery", 76, {
+            friendly_name: "Battery",
+            unit_of_measurement: "%",
+            icon: "mdi:battery-70",
+          }),
+          "sensor.power": makeState("sensor.power", 1430, {
+            friendly_name: "Current power",
+            unit_of_measurement: "W",
+            icon: "mdi:flash",
+          }),
+          "sensor.power_limit": makeState("sensor.power_limit", 2500, {
+            friendly_name: "Power limit",
+            unit_of_measurement: "W",
+          }),
+          "sensor.temperature_delta": makeState("sensor.temperature_delta", -4.5, {
+            friendly_name: "Temperature delta",
+            unit_of_measurement: "°C",
+            icon: "mdi:thermometer",
+          }),
+          "sensor.air_quality": makeState("sensor.air_quality", 42, {
+            friendly_name: "Air quality",
+            unit_of_measurement: "AQI",
+          }),
+          "sensor.shellyplug_kitchen_power": makeState("sensor.shellyplug_kitchen_power", 184, {
+            friendly_name: "Shelly Kitchen",
+            unit_of_measurement: "W",
+            icon: "mdi:power-socket-eu",
+          }),
+          "sensor.shellyplus_office_power": makeState("sensor.shellyplus_office_power", 64, {
+            friendly_name: "Shelly Office",
+            unit_of_measurement: "W",
+            icon: "mdi:desktop-tower-monitor",
+          }),
+          "sensor.shelly_dishwasher_power": makeState("sensor.shelly_dishwasher_power", 1268, {
+            friendly_name: "Shelly Dishwasher",
+            unit_of_measurement: "W",
+            icon: "mdi:dishwasher",
+          }),
+          "sensor.shelly_idle_power": makeState("sensor.shelly_idle_power", 0.4, {
+            friendly_name: "Shelly Idle",
+            unit_of_measurement: "W",
+            icon: "mdi:power-plug-off",
+          }),
+          "sensor.shelly_unknown_power": makeState("sensor.shelly_unknown_power", "unknown", {
+            friendly_name: "Shelly Unknown",
+            unit_of_measurement: "W",
+          }),
+          "sensor.shellyem3_c8c9a315cd51_phase_a_power": makeState("sensor.shellyem3_c8c9a315cd51_phase_a_power", 330, {
+            friendly_name: "Shelly EM3 Phase A",
+            unit_of_measurement: "W",
+          }),
+          "sensor.shellyem3_c8c9a315cd51_phase_b_power": makeState("sensor.shellyem3_c8c9a315cd51_phase_b_power", 280, {
+            friendly_name: "Shelly EM3 Phase B",
+            unit_of_measurement: "W",
+          }),
+          "sensor.shellyem3_c8c9a315cd51_phase_c_power": makeState("sensor.shellyem3_c8c9a315cd51_phase_c_power", 300, {
+            friendly_name: "Shelly EM3 Phase C",
+            unit_of_measurement: "W",
+          }),
+          "sensor.strom_gesamtleistung": makeState("sensor.strom_gesamtleistung", 1890, {
+            friendly_name: "Strom Gesamtleistung",
+            unit_of_measurement: "W",
+          }),
+          "sensor.load_a": makeState("sensor.load_a", 24, { friendly_name: "Load A", unit_of_measurement: "%" }),
+          "sensor.load_b": makeState("sensor.load_b", 66, { friendly_name: "Load B", unit_of_measurement: "%" }),
+          "sensor.load_c": makeState("sensor.load_c", 12, { friendly_name: "Load C", unit_of_measurement: "%" }),
+          "sensor.unavailable_demo": makeState("sensor.unavailable_demo", "unavailable", {
+            friendly_name: "Unavailable demo",
+            unit_of_measurement: "%",
+          }),
+          "person.demo": makeState("person.demo", "home", {
+            friendly_name: "Demo person",
+            entity_picture: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='32' fill='%23007a78'/%3E%3Ctext x='32' y='39' font-size='24' text-anchor='middle' fill='white' font-family='Arial'%3ED%3C/text%3E%3C/svg%3E",
+          }),
+          "switch.test_switch": makeState("switch.test_switch", "off", {
+            friendly_name: "Test switch",
+          }),
+        };
+      }
+
+      function makeHass() {
+        return {
+          states: state.states,
+          formatEntityName(entity) {
+            return entity?.attributes?.friendly_name || entity?.entity_id || "";
+          },
+          formatEntityState(entity) {
+            const unit = entity?.attributes?.unit_of_measurement;
+            return `${entity?.state ?? ""}${unit ? ` ${unit}` : ""}`;
+          },
+          callService(domain, service, data, target) {
+            writeLog(`callService ${domain}.${service} ${JSON.stringify({ data, target })}`);
+            if (domain === "homeassistant" && service === "toggle" && data?.entity_id) {
+              const entity = state.states[data.entity_id];
+              if (entity) entity.state = entity.state === "on" ? "off" : "on";
+              render();
+            }
+          },
+        };
+      }
+
+      function shellyAutoEntitiesResult() {
+        const excluded = new Set([
+          "sensor.shellyem3_c8c9a315cd51_phase_a_power",
+          "sensor.shellyem3_c8c9a315cd51_phase_b_power",
+          "sensor.shellyem3_c8c9a315cd51_phase_c_power",
+          "sensor.strom_gesamtleistung",
+        ]);
+
+        return Object.values(state.states)
+          .filter((entity) => entity.entity_id.startsWith("sensor.shelly") && entity.entity_id.endsWith("_power"))
+          .filter((entity) => !excluded.has(entity.entity_id))
+          .filter((entity) => !["unavailable", "unknown"].includes(String(entity.state).toLowerCase()))
+          .filter((entity) => Number(entity.state) > 1)
+          .sort((a, b) => Number(b.state) - Number(a.state))
+          .map((entity) => entity.entity_id);
+      }
+
+      function scenarios() {
+        return [
+          {
+            title: "Basic battery with severity and target",
+            config: {
+              type: "custom:bar-card",
+              entity: "sensor.battery",
+              title: "Battery",
+              min: 0,
+              max: 100,
+              target: 80,
+              severity: [
+                { from: 0, to: 20, color: "var(--error-color)", icon: "mdi:battery-alert" },
+                { from: 21, to: 100, color: "var(--success-color)" },
+              ],
+            },
+          },
+          {
+            title: "Entity-backed max with target band",
+            config: {
+              type: "custom:bar-card",
+              entity: "sensor.power",
+              title: "Power",
+              min: 0,
+              max: "sensor.power_limit",
+              target: 1800,
+              target_band: { from: 1200, to: 2000 },
+              decimal: 0,
+              color: "#006d77",
+              background_color: "rgba(0, 109, 119, .16)",
+            },
+          },
+          {
+            title: "Centered zero range",
+            config: {
+              type: "custom:bar-card",
+              entity: "sensor.temperature_delta",
+              title: "Delta",
+              min: -20,
+              max: 20,
+              center_zero: true,
+              bar_background_radius: "8px",
+              bar_radius: "6px",
+              color: "#7b2cbf",
+            },
+          },
+          {
+            title: "Hidden unavailable entity",
+            config: {
+              type: "custom:bar-card",
+              title: "Availability",
+              hide_unavailable: state.unavailableHidden,
+              entities: [
+                "sensor.battery",
+                "sensor.unavailable_demo",
+              ],
+            },
+          },
+          {
+            title: "Vertical person picture",
+            config: {
+              type: "custom:bar-card",
+              entity: "person.demo",
+              title: "Presence as value map",
+              min: 0,
+              max: 1,
+              height: "160px",
+              direction: "up",
+              show_entity_picture: true,
+              value_map: [
+                { value: "home", text: "Home" },
+                { value: "not_home", text: "Away" },
+              ],
+            },
+          },
+          {
+            title: "Sortable multi-entity demo",
+            config: {
+              type: "custom:bar-card",
+              title: "Loads",
+              sort: sortMode.value,
+              columns: 1,
+              entities: [
+                "sensor.load_a",
+                "sensor.load_b",
+                "sensor.load_c",
+              ],
+            },
+          },
+          {
+            title: "Real YAML: Shelly auto-entities output",
+            config: {
+              type: "custom:bar-card",
+              title: "Aktuelle Shelly-Verbraucher",
+              direction: "right",
+              min: 0,
+              max: 2500,
+              height: "34px",
+              width: "100%",
+              bar_background_radius: "8px",
+              bar_radius: "4px",
+              decimal: 0,
+              unit_of_measurement: "W",
+              limit_value: false,
+              positions: {
+                icon: "outside",
+                name: "inside",
+                value: "inside",
+                indicator: "off",
+                minmax: "off",
+              },
+              animation: {
+                state: "on",
+                speed: 4,
+              },
+              severity: [
+                { from: 0, to: 25, color: "var(--success-color)" },
+                { from: 26, to: 250, color: "var(--primary-color)" },
+                { from: 251, to: 1000, color: "var(--warning-color)" },
+                { from: 1001, to: 2500, color: "var(--error-color)" },
+              ],
+              tap_action: {
+                action: "more-info",
+              },
+              hold_action: {
+                action: "more-info",
+              },
+              entities: shellyAutoEntitiesResult(),
+            },
+          },
+          {
+            title: "Actions",
+            config: {
+              type: "custom:bar-card",
+              entity: "switch.test_switch",
+              title: "Tap toggles switch",
+              min: 0,
+              max: 1,
+              value_map: [
+                { value: "off", text: "Off" },
+                { value: "on", text: "On" },
+              ],
+              tap_action: { action: "toggle" },
+              hold_action: { action: "more-info" },
+            },
+          },
+          {
+            title: "Value map range",
+            config: {
+              type: "custom:bar-card",
+              entity: "sensor.air_quality",
+              title: "Air quality",
+              value_map: [
+                { from: 0, to: 50, text: "Good" },
+                { from: 51, to: 100, text: "Moderate" },
+              ],
+            },
+          },
+        ];
+      }
+
+      function render() {
+        const hass = makeHass();
+        cards.replaceChildren();
+        for (const scenario of scenarios()) {
+          const wrapper = document.createElement("div");
+          const title = document.createElement("p");
+          const card = document.createElement("bar-card");
+          wrapper.dataset.scenario = scenario.title;
+          title.className = "scenario-title";
+          title.textContent = scenario.title;
+          card.setConfig(scenario.config);
+          card.hass = hass;
+          card.addEventListener("hass-more-info", (event) => writeLog(`more-info ${event.detail.entityId}`));
+          card.addEventListener("bar-card-action", (event) => writeLog(`custom action ${event.detail.action}`));
+          card.addEventListener("ll-custom", (event) => writeLog(`ll-custom ${JSON.stringify(event.detail)}`));
+          wrapper.append(title, card);
+          cards.append(wrapper);
+        }
+        runChecks();
+      }
+
+      function writeLog(message) {
+        const line = `[${new Date().toLocaleTimeString()}] ${message}`;
+        log.textContent = `${line}\n${log.textContent}`.slice(0, 4000);
+      }
+
+      function setSensor(entityId, value) {
+        state.states[entityId].state = String(value);
+      }
+
+      function randomize() {
+        setSensor("sensor.battery", Math.round(Math.random() * 100));
+        setSensor("sensor.power", Math.round(400 + Math.random() * 2400));
+        setSensor("sensor.temperature_delta", (Math.random() * 40 - 20).toFixed(1));
+        setSensor("sensor.air_quality", Math.round(Math.random() * 100));
+        setSensor("sensor.shellyplug_kitchen_power", Math.round(1 + Math.random() * 450));
+        setSensor("sensor.shellyplus_office_power", Math.round(1 + Math.random() * 260));
+        setSensor("sensor.shelly_dishwasher_power", Math.round(600 + Math.random() * 1400));
+        setSensor("sensor.shelly_idle_power", (Math.random() * 1).toFixed(1));
+        setSensor("sensor.load_a", Math.round(Math.random() * 100));
+        setSensor("sensor.load_b", Math.round(Math.random() * 100));
+        setSensor("sensor.load_c", Math.round(Math.random() * 100));
+        render();
+      }
+
+      function runChecks() {
+        const results = [];
+        const allCards = [...document.querySelectorAll("bar-card")];
+        const renderedText = cards.textContent;
+        const shellyScenario = document.querySelector('[data-scenario="Real YAML: Shelly auto-entities output"]');
+        const shellyText = shellyScenario?.textContent || "";
+        results.push(["custom element registered", Boolean(customElements.get("bar-card"))]);
+        results.push(["all scenarios rendered", allCards.length === scenarios().length]);
+        results.push(["target marker rendered", Boolean(document.querySelector("bar-card-markerbar"))]);
+        results.push(["vertical class rendered", Boolean(document.querySelector(".direction-up.vertical"))]);
+        results.push(["value map text rendered", renderedText.includes("Good") || renderedText.includes("Moderate")]);
+        results.push(["Shelly YAML scenario rendered", shellyText.includes("Aktuelle Shelly-Verbraucher") && shellyText.includes("Shelly Dishwasher")]);
+        results.push(["Shelly auto-entities exclusions applied", !shellyText.includes("Shelly EM3 Phase A") && !shellyText.includes("Strom Gesamtleistung")]);
+        results.push(["hidden unavailable has no warning", state.unavailableHidden ? !renderedText.includes("Entität nicht verfügbar") : true]);
+        checks.innerHTML = results
+          .map(([label, pass]) => `<div class="${pass ? "pass" : "fail"}">${pass ? "PASS" : "FAIL"} ${label}</div>`)
+          .join("");
+      }
+
+      document.querySelector("#randomize").addEventListener("click", randomize);
+      document.querySelector("#toggle-availability").addEventListener("click", () => {
+        state.unavailableHidden = !state.unavailableHidden;
+        writeLog(`hide_unavailable ${state.unavailableHidden}`);
+        render();
+      });
+      document.querySelector("#theme-toggle").addEventListener("click", () => {
+        document.body.classList.toggle("dark");
+      });
+      document.querySelector("#run-checks").addEventListener("click", runChecks);
+      sortMode.addEventListener("change", render);
+
+      render();
+    </script>
+  </body>
+</html>
