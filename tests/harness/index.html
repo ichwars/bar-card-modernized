@@ -505,13 +505,27 @@
           title.textContent = scenario.title;
           card.setConfig(scenario.config);
           card.hass = hass;
-          card.addEventListener("hass-more-info", (event) => writeLog(`more-info ${event.detail.entityId}`));
+          card.addEventListener("hass-action", (event) => handleHassAction(event, hass));
           card.addEventListener("bar-card-action", (event) => writeLog(`custom action ${event.detail.action}`));
-          card.addEventListener("ll-custom", (event) => writeLog(`ll-custom ${JSON.stringify(event.detail)}`));
           wrapper.append(title, card);
           cards.append(wrapper);
         }
         runChecks();
+      }
+
+      function handleHassAction(event, hass) {
+        const actionName = event.detail.action;
+        const config = event.detail.config;
+        const actionConfig = config[`${actionName}_action`] || config.tap_action;
+        writeLog(`hass-action ${actionName} ${actionConfig?.action || "unknown"}`);
+
+        if (actionConfig?.action === "toggle") {
+          hass.callService("homeassistant", "toggle", { entity_id: actionConfig.entity || config.entity });
+        }
+
+        if (actionConfig?.action === "more-info") {
+          writeLog(`more-info ${actionConfig.entity || config.entity}`);
+        }
       }
 
       function writeLog(message) {
@@ -552,9 +566,21 @@
         results.push(["Shelly YAML scenario rendered", shellyText.includes("Aktuelle Shelly-Verbraucher") && shellyText.includes("Shelly Dishwasher")]);
         results.push(["Shelly auto-entities exclusions applied", !shellyText.includes("Shelly EM3 Phase A") && !shellyText.includes("Strom Gesamtleistung")]);
         results.push(["hidden unavailable has no warning", state.unavailableHidden ? !renderedText.includes("Entität nicht verfügbar") : true]);
+        results.push(["native hass-action supported", supportsHassAction()]);
         checks.innerHTML = results
           .map(([label, pass]) => `<div class="${pass ? "pass" : "fail"}">${pass ? "PASS" : "FAIL"} ${label}</div>`)
           .join("");
+      }
+
+      function supportsHassAction() {
+        const Card = customElements.get("bar-card");
+        const card = new Card();
+        let seen = false;
+        card.addEventListener("hass-action", (event) => {
+          seen = event.detail.action === "tap" && event.detail.config.tap_action?.action === "toggle";
+        });
+        card._handleAction({ entity: "switch.test_switch", tap_action: { action: "toggle" } }, "tap");
+        return seen;
       }
 
       document.querySelector("#randomize").addEventListener("click", randomize);

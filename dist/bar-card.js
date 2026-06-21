@@ -5,7 +5,7 @@
  * Released under the MIT License.
  */
 
-const CARD_VERSION = "4.0.0-fork.0";
+const CARD_VERSION = "4.0.1";
 const ORIGINAL_REPOSITORY = "https://github.com/custom-cards/bar-card";
 const DOCUMENTATION_URL = "https://github.com/ichwars/bar-card-modernized";
 
@@ -42,6 +42,19 @@ const DEFAULT_CONFIG = {
   center_zero: false,
   sort: "none",
 };
+
+const POSITION_VALUES = new Set(["inside", "outside", "off"]);
+const DIRECTION_VALUES = new Set(["right", "left", "up", "down"]);
+const ACTION_EVENT_TYPES = new Set([
+  "assist",
+  "call-service",
+  "fire-dom-event",
+  "more-info",
+  "navigate",
+  "perform-action",
+  "toggle",
+  "url",
+]);
 
 const LOCALIZE = {
   en: {
@@ -144,6 +157,10 @@ function looksLikeEntityId(value) {
   return typeof value === "string" && /^[a-zA-Z_][\w]*\.[\w.-]+$/.test(value.trim());
 }
 
+function normalizeEntityId(value) {
+  return looksLikeEntityId(value) ? value.trim() : undefined;
+}
+
 function getStateObj(hass, entityId) {
   return entityId && hass?.states ? hass.states[entityId] : undefined;
 }
@@ -177,6 +194,33 @@ function stableHash(value) {
   return hash;
 }
 
+function normalizeDirectionValue(value) {
+  const normalized = String(value || DEFAULT_CONFIG.direction).replace("-reverse", "");
+  return DIRECTION_VALUES.has(normalized) ? normalized : DEFAULT_CONFIG.direction;
+}
+
+function normalizePositionValue(value, fallback) {
+  return POSITION_VALUES.has(value) ? value : fallback;
+}
+
+function normalizeAnimation(animation) {
+  const normalized = deepMerge(DEFAULT_ANIMATION, animation || {});
+  normalized.state = normalized.state === "on" ? "on" : "off";
+  const speed = parseNumber(normalized.speed);
+  normalized.speed = Number.isFinite(speed) ? Math.max(1, speed) : DEFAULT_ANIMATION.speed;
+  return normalized;
+}
+
+function normalizePositions(positions) {
+  const merged = deepMerge(DEFAULT_POSITIONS, positions || {});
+  return Object.fromEntries(
+    Object.entries(DEFAULT_POSITIONS).map(([key, fallback]) => [
+      key,
+      normalizePositionValue(merged[key], fallback),
+    ]),
+  );
+}
+
 function defaultIcon(entityId) {
   const domain = domainFromEntity(entityId);
   const icons = {
@@ -205,32 +249,38 @@ function makeEntityArray(config) {
   if (Array.isArray(config.entities)) {
     return config.entities.map((entry) => {
       const entityConfig = typeof entry === "string" ? { entity: entry } : entry || {};
-      return deepMerge(DEFAULT_CONFIG, baseConfig, entityConfig, {
-        positions: deepMerge(DEFAULT_POSITIONS, baseConfig.positions || {}, entityConfig.positions || {}),
-        animation: deepMerge(DEFAULT_ANIMATION, baseConfig.animation || {}, entityConfig.animation || {}),
-      });
+      return normalizeEntityConfig(deepMerge(DEFAULT_CONFIG, baseConfig, entityConfig));
     });
   }
 
   return [
-    deepMerge(DEFAULT_CONFIG, baseConfig, {
-      positions: deepMerge(DEFAULT_POSITIONS, baseConfig.positions || {}),
-      animation: deepMerge(DEFAULT_ANIMATION, baseConfig.animation || {}),
-    }),
+    normalizeEntityConfig(deepMerge(DEFAULT_CONFIG, baseConfig)),
   ];
 }
 
 function normalizeConfig(config) {
   const normalized = deepMerge(DEFAULT_CONFIG, config || {}, {
-    positions: deepMerge(DEFAULT_POSITIONS, config?.positions || {}),
-    animation: deepMerge(DEFAULT_ANIMATION, config?.animation || {}),
+    positions: normalizePositions(config?.positions),
+    animation: normalizeAnimation(config?.animation),
   });
 
   if (normalized.stack === "horizontal" && Array.isArray(normalized.entities)) {
     normalized.columns = normalized.entities.length || 1;
   }
 
-  normalized.columns = Math.max(1, Number(normalized.columns || 1));
+  normalized.direction = normalizeDirectionValue(normalized.direction);
+  normalized.columns = Math.max(1, Math.floor(parseNumber(normalized.columns) || 1));
+  normalized.sort = ["none", "asc", "desc"].includes(normalized.sort) ? normalized.sort : DEFAULT_CONFIG.sort;
+  return normalized;
+}
+
+function normalizeEntityConfig(config) {
+  const normalized = deepMerge(DEFAULT_CONFIG, config || {});
+  normalized.direction = normalizeDirectionValue(normalized.direction);
+  normalized.positions = normalizePositions(normalized.positions);
+  normalized.animation = normalizeAnimation(normalized.animation);
+  normalized.columns = Math.max(1, Math.floor(parseNumber(normalized.columns) || 1));
+  normalized.sort = ["none", "asc", "desc"].includes(normalized.sort) ? normalized.sort : DEFAULT_CONFIG.sort;
   return normalized;
 }
 
@@ -292,7 +342,7 @@ class BarCard extends HTMLElement {
         { name: "entities", selector: { entity: { multiple: true } } },
         { name: "title", selector: { text: {} } },
         { name: "name", selector: { text: {} } },
-        { name: "icon", selector: { icon: {} } },
+        { name: "icon", selector: { icon: {} }, context: { icon_entity: "entity" } },
         { name: "color", selector: { text: {} } },
         { name: "bar_background_radius", selector: { text: {} } },
         { name: "bar_radius", selector: { text: {} } },
@@ -317,7 +367,7 @@ class BarCard extends HTMLElement {
         { name: "target", selector: { text: {} } },
         { name: "decimal", selector: { number: { min: 0, mode: "box" } } },
         { name: "unit_of_measurement", selector: { text: {} } },
-        { name: "attribute", selector: { text: {} } },
+        { name: "attribute", selector: { attribute: {} }, context: { filter_entity: "entity" } },
         { name: "hide_unavailable", selector: { boolean: {} } },
         { name: "limit_value", selector: { boolean: {} } },
         { name: "complementary", selector: { boolean: {} } },
@@ -337,6 +387,29 @@ class BarCard extends HTMLElement {
           },
         },
       ],
+      computeLabel: (schema) => {
+        const labels = {
+          bar_background_radius: "Outer bar radius",
+          bar_radius: "Filled bar radius",
+          center_zero: "Fill from zero",
+          entity_row: "Entity row mode",
+          hide_unavailable: "Hide unavailable",
+          limit_value: "Clamp value",
+          show_entity_picture: "Show entity picture",
+        };
+        return labels[schema.name];
+      },
+      computeHelper: (schema) => {
+        const helpers = {
+          bar_background_radius: "Radius of the outer bar background, for example 8px or 0px.",
+          bar_radius: "Radius of the filled current bar, for example 4px or inherit.",
+          max: "Number, numeric string, or entity ID used as the upper range.",
+          min: "Number, numeric string, or entity ID used as the lower range.",
+          target: "Optional number, numeric string, or entity ID for the target marker.",
+          sort: "Sorts multi-entity cards by the current numeric value.",
+        };
+        return helpers[schema.name];
+      },
     };
   }
 
@@ -350,6 +423,7 @@ class BarCard extends HTMLElement {
     this._lastTap = new Map();
     this._renderFrame = undefined;
     this._renderQueued = false;
+    this._lastRenderSnapshot = undefined;
   }
 
   setConfig(config) {
@@ -359,11 +433,14 @@ class BarCard extends HTMLElement {
 
     this._config = normalizeConfig(config);
     this._configArray = makeEntityArray(this._config);
+    this._lastRenderSnapshot = undefined;
     this._queueRender();
   }
 
   set hass(hass) {
+    const nextSnapshot = this._config ? this._renderSnapshot(hass) : undefined;
     this._hass = hass;
+    if (nextSnapshot && nextSnapshot === this._lastRenderSnapshot) return;
     this._queueRender();
   }
 
@@ -425,6 +502,8 @@ class BarCard extends HTMLElement {
       return;
     }
 
+    this._lastRenderSnapshot = this._renderSnapshot(hass);
+
     this._renderedConfigArray = this._sortedConfigArray();
     const bars = this._renderedConfigArray
       .map((config, index) => this._barTemplate(config, index))
@@ -448,6 +527,41 @@ class BarCard extends HTMLElement {
     `;
 
     this._attachActions();
+  }
+
+  _renderSnapshot(hass) {
+    const entities = new Set();
+    const configs = this._configArray.length ? this._configArray : [this._config];
+    for (const config of configs) {
+      if (!config) continue;
+      [
+        config.entity,
+        config.name_entity,
+        normalizeEntityId(config.min),
+        normalizeEntityId(config.max),
+        normalizeEntityId(config.target),
+        normalizeEntityId(config.target_band?.from),
+        normalizeEntityId(config.target_band?.to),
+      ].forEach((entityId) => {
+        if (entityId) entities.add(entityId);
+      });
+    }
+
+    const states = [...entities].sort().map((entityId) => {
+      const stateObj = getStateObj(hass, entityId);
+      return [
+        entityId,
+        stateObj?.state ?? null,
+        stateObj?.attributes ?? null,
+      ];
+    });
+
+    return JSON.stringify({
+      config: this._configArray,
+      columns: this._config?.columns,
+      rows: this._config?.grid_rows,
+      states,
+    });
   }
 
   _sortedConfigArray() {
@@ -483,8 +597,10 @@ class BarCard extends HTMLElement {
 
     if (unavailable && config.hide_unavailable) return "";
 
-    const min = resolveNumber(hass, config.min, 0);
-    const max = resolveNumber(hass, config.max, 100);
+    const resolvedMin = resolveNumber(hass, config.min, 0);
+    const resolvedMax = resolveNumber(hass, config.max, 100);
+    const min = Math.min(resolvedMin, resolvedMax);
+    const max = Math.max(resolvedMin, resolvedMax);
     const target = config.target !== undefined && config.target !== null && config.target !== "" ? resolveNumber(hass, config.target, Number.NaN) : Number.NaN;
     let barValue = Number.isFinite(numericRawValue) ? numericRawValue : 0;
 
@@ -499,7 +615,7 @@ class BarCard extends HTMLElement {
     const backgroundColor = cssValue(config.background_color || "var(--bar-card-background-color, color-mix(in srgb, var(--bar-color) 25%, transparent))");
     const iconColor = cssValue(severity?.icon_color || config.icon_color || "var(--bar-icon-color, var(--bar-color))");
     const percentages = this._computeBarPercentages(barValue, min, max, config);
-    const direction = this._normalizeDirection(config.direction);
+    const direction = normalizeDirectionValue(config.direction);
     const vertical = ["up", "down"].includes(direction);
     const backgroundBarRadius = cssValue(config.bar_background_radius || "var(--bar-card-background-border-radius, var(--bar-card-border-radius, var(--ha-card-border-radius, 12px)))");
     const currentBarRadius = cssValue(config.bar_radius || "var(--bar-card-currentbar-border-radius, inherit)");
@@ -900,12 +1016,6 @@ class BarCard extends HTMLElement {
     return undefined;
   }
 
-  _normalizeDirection(direction) {
-    const normalized = String(direction || "right").replace("-reverse", "");
-    if (["right", "left", "up", "down"].includes(normalized)) return normalized;
-    return "right";
-  }
-
   _computeBarPercentages(value, min, max, config) {
     if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max) || min === max) {
       return { start: 0, size: 0 };
@@ -1021,50 +1131,18 @@ class BarCard extends HTMLElement {
 
     if (!actionConfig || actionConfig.action === "none") return;
 
-    switch (actionConfig.action) {
-      case "more-info":
-        fireEvent(this, "hass-more-info", { entityId: actionConfig.entity || config.entity });
-        break;
-      case "toggle":
-        this._callToggle(config.entity);
-        break;
-      case "navigate":
-        this._navigate(actionConfig.navigation_path);
-        break;
-      case "url":
-        if (actionConfig.url_path) window.open(actionConfig.url_path, "_blank", "noopener,noreferrer");
-        break;
-      case "perform-action":
-      case "call-service":
-        this._callServiceAction(actionConfig);
-        break;
-      case "fire-dom-event":
-        fireEvent(this, "ll-custom", actionConfig, { bubbles: true, composed: true });
-        break;
-      default:
-        fireEvent(this, "bar-card-action", { config, action: actionName, actionConfig, originalEvent: event });
+    const normalizedAction = String(actionConfig.action || "");
+    if (!ACTION_EVENT_TYPES.has(normalizedAction)) {
+      fireEvent(this, "bar-card-action", { config, action: actionName, actionConfig, originalEvent: event });
+      return;
     }
-  }
 
-  _callToggle(entityId) {
-    if (!entityId || !this._hass?.callService) return;
-    this._hass.callService("homeassistant", "toggle", { entity_id: entityId });
-  }
-
-  _callServiceAction(actionConfig) {
-    if (!this._hass?.callService) return;
-    const action = actionConfig.perform_action || actionConfig.service;
-    if (!action || !String(action).includes(".")) return;
-    const [domain, service] = String(action).split(".");
-    const data = { ...(actionConfig.data || actionConfig.service_data || {}) };
-    if (actionConfig.target?.entity_id && !data.entity_id) data.entity_id = actionConfig.target.entity_id;
-    this._hass.callService(domain, service, data, actionConfig.target);
-  }
-
-  _navigate(path) {
-    if (!path) return;
-    history.pushState(null, "", path);
-    fireEvent(window, "location-changed", { replace: false });
+    const eventConfig = {
+      ...config,
+      entity: actionConfig.entity || config.entity,
+      [`${actionName}_action`]: actionConfig,
+    };
+    fireEvent(this, "hass-action", { config: eventConfig, action: actionName, originalEvent: event }, { cancelable: true });
   }
 }
 

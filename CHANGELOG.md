@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.0.1
+
+Patch release focused on Home Assistant compatibility and stability.
+
+- Dispatch Lovelace actions through Home Assistant's native `hass-action` event.
+- Avoid full re-renders when relevant entity/config inputs have not changed.
+- Normalize common config edge cases for directions, positions, columns, animation settings, and reversed min/max ranges.
+- Improve built-in form labels, helpers, and selector context for icons and attributes.
+- Add dependency-free smoke tests for registration, actions, render snapshots, and config normalization.
+- Add real-world README examples for `custom:auto-entities`, centered zero ranges, and dynamic target bands.
+- Add a 4.0.1 roadmap and acceptance checklist.
+
 ## 4.0.0-fork.0
 
 Initial maintained fork release.

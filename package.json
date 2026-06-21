@@ -1,6 +1,6 @@
 {
   "name": "bar-card-modernized",
-  "version": "4.0.0-fork.0",
+  "version": "4.0.1",
   "description": "Modernized maintained community fork of custom-cards/bar-card for Home Assistant dashboards.",
   "type": "module",
   "main": "dist/bar-card.js",
@@ -29,6 +29,7 @@
   "scripts": {
     "build": "node scripts/build.js",
     "check": "node --check dist/bar-card.js",
+    "smoke": "node scripts/smoke-test.js",
     "harness": "node scripts/serve-harness.js"
   },
   "dependencies": {},

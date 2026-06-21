@@ -11,7 +11,7 @@ This fork exists because the original project appears to lack active maintenance
 - Uses the current Home Assistant custom-card lifecycle: `setConfig`, `hass`, `getCardSize`, `getGridOptions`, `getStubConfig`, `getConfigForm`, and card-picker registration via `window.customCards`.
 - Adds entity suggestions for Home Assistant 2026.6+ card picker.
 - Replaces the old custom visual editor with Home Assistant's built-in form editor to avoid the freezes/crashes reported with newer Home Assistant versions.
-- Supports the newer action syntax (`perform-action`) while keeping legacy `call-service`, `more-info`, `toggle`, `navigate`, `url`, and `fire-dom-event` behavior.
+- Uses Home Assistant's native `hass-action` event for actions, including `perform-action`, `call-service`, `more-info`, `toggle`, `navigate`, `url`, `assist`, and `fire-dom-event`.
 - Supports entity-backed `min`, `max`, and `target` values.
 - Adds `hide_unavailable`, `show_entity_picture`, `name_entity`, `name_attribute`, `background_color`, `icon_color`, `center_zero`, `value_map`, and `target_band` options.
 - Adds separate radius controls for the outer bar background and the filled current bar.
@@ -48,6 +48,14 @@ npm run harness
 Then open <http://localhost:4173/>. The harness loads `src/bar-card.js`, mocks the minimal `hass` object, and renders scenarios for severity colors, entity-backed ranges, target bands, centered zero ranges, hidden unavailable entities, vertical bars, sorting, value maps, entity pictures, and basic actions.
 
 This does not replace testing inside a real Home Assistant dashboard, but it is useful for catching visual and interaction regressions before installing the card.
+
+For non-visual smoke checks:
+
+```bash
+npm run smoke
+```
+
+The smoke test verifies custom-element registration, native `hass-action` dispatch, render-snapshot behavior, and common config normalization.
 
 ## Basic usage
 
@@ -167,6 +175,73 @@ tap_action:
   perform_action: input_boolean.toggle
   target:
     entity_id: input_boolean.example
+```
+
+Real-world `custom:auto-entities` example:
+
+```yaml
+type: custom:auto-entities
+show_empty: false
+card_param: entities
+card:
+  type: custom:bar-card
+  title: Aktuelle Shelly-Verbraucher
+  direction: right
+  min: 0
+  max: 2500
+  height: 34px
+  decimal: 0
+  unit_of_measurement: W
+  bar_background_radius: 8px
+  bar_radius: 4px
+  positions:
+    icon: outside
+    name: inside
+    value: inside
+    indicator: "off"
+    minmax: "off"
+  animation:
+    state: "on"
+    speed: 6
+  tap_action:
+    action: more-info
+filter:
+  include:
+    - domain: sensor
+      entity_id: sensor.shelly*_power
+      state: "> 1"
+  exclude:
+    - state: unavailable
+    - state: unknown
+sort:
+  method: state
+  numeric: true
+  reverse: true
+```
+
+Centered zero example:
+
+```yaml
+type: custom:bar-card
+entity: sensor.temperature_delta
+min: -20
+max: 20
+center_zero: true
+bar_background_radius: 8px
+bar_radius: 4px
+```
+
+Dynamic range and target band example:
+
+```yaml
+type: custom:bar-card
+entity: sensor.current_power
+min: 0
+max: sensor.power_limit
+target: sensor.power_target
+target_band:
+  from: sensor.power_target_low
+  to: sensor.power_target_high
 ```
 
 ## CSS / card-mod hooks
